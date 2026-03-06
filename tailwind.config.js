@@ -8,6 +8,6 @@ export default {
     extend: {},
   },
   plugins: [
-    require('@tailwindcss/typography') // 이 부분이 꼭 있어야 합니다!
+    require('@tailwindcss/typography'),
   ],
 }
