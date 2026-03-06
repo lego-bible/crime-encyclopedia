@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useMemo } from 'react';
 import { Search, Copy, Trash2, BookOpen, AlertTriangle, Loader2, CheckCircle2, Fingerprint, Globe, MapPin, Database, Key, Lock, LogOut } from 'lucide-react';
 
 // 국내 범죄 사건 100선
@@ -70,16 +70,14 @@ const FOREIGN_CASES = [
 ];
 
 export default function App() {
-  // 정렬된 배열 (가나다순)
   const sortedDomestic = useMemo(() => [...DOMESTIC_CASES].sort((a, b) => a.localeCompare(b, 'ko-KR')), []);
   const sortedForeign = useMemo(() => [...FOREIGN_CASES].sort((a, b) => a.localeCompare(b, 'ko-KR')), []);
 
-  // 인증 상태 관리
+  // 인증 상태 관리 (배포용)
   const [apiKey, setApiKey] = useState("");
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [keyInput, setKeyInput] = useState("");
 
-  // 상태 관리
   const [domesticInput, setDomesticInput] = useState("");
   const [foreignInput, setForeignInput] = useState("");
   const [manualInput, setManualInput] = useState("");
@@ -88,7 +86,7 @@ export default function App() {
   const [error, setError] = useState("");
   const [toastMessage, setToastMessage] = useState("");
 
-  // 로그인/로그아웃 핸들러
+  // 로그인 핸들러
   const handleLogin = (e) => {
     e.preventDefault();
     if (keyInput.trim().length > 10) {
@@ -108,7 +106,6 @@ export default function App() {
     showToast("시스템에서 안전하게 로그아웃되었습니다.");
   };
 
-  // 입력창 상호 배타적 초기화
   const handleDomesticChange = (e) => {
     setDomesticInput(e.target.value);
     setForeignInput("");
@@ -127,10 +124,19 @@ export default function App() {
     setForeignInput("");
   };
 
-  // Gemini API 호출 로직 (에러 상세 로깅 및 스키마 검사 완화)
+  // 배포용 Gemini API 호출 로직 (모델 자동 Fallback 기능)
   const fetchWithRetry = async (prompt, maxRetries = 5) => {
     let retries = 0;
     const delays = [1000, 2000, 4000, 8000, 16000];
+
+    // API 키마다 허용된 모델이 다를 수 있으므로 배열 순서대로 시도합니다.
+    const availableModels = [
+      'gemini-1.5-flash',
+      'gemini-1.5-pro',
+      'gemini-1.5-flash-8b',
+      'gemini-pro'
+    ];
+    let currentModelIndex = 0;
 
     const systemInstruction = `당신은 전 세계의 범죄 사건과 역사적 비극을 철저하게 기록하는 <세계 범죄 사건 백과사전 데이터베이스>입니다.
 사용자가 특정 범죄 사건을 요청하면, 해당 사건에 대해 A4 용지 최대 4장 분량에 달할 정도로 매우 깊이 있고 구체적으로 설명해야 합니다.
@@ -142,7 +148,6 @@ export default function App() {
   "aftermath": "사건이 사회, 법, 제도에 미친 파장, 재판 결과 및 형량, 범인의 현재 상태, 사회적/제도적 변화 등을 서술..."
 }`;
 
-    // 400 에러를 방지하기 위해 responseSchema를 제거하고 순수 JSON 응답만 지시
     const payload = {
       contents: [{ parts: [{ text: prompt }] }],
       systemInstruction: { parts: [{ text: systemInstruction }] },
@@ -153,25 +158,31 @@ export default function App() {
 
     while (retries <= maxRetries) {
       try {
-        // ✅ 가장 안정적인 정식 명칭 모델인 gemini-1.5-flash로 수정됨 (-latest 제거)
-        const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`, {
+        const modelToTry = availableModels[currentModelIndex];
+        console.log(`[시스템] ${modelToTry} 모델로 접속 시도 중...`);
+
+        const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${modelToTry}:generateContent?key=${apiKey}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload)
         });
 
-        // 에러 상세 정보 출력
         if (!response.ok) {
           const errorDetails = await response.text();
+          
+          // 404 에러 시 다음 모델로 넘어가기
+          if (response.status === 404 && currentModelIndex < availableModels.length - 1) {
+            console.warn(`[경고] ${modelToTry} 모델을 사용할 수 없어 다음 모델로 전환합니다.`);
+            currentModelIndex++;
+            continue; // 횟수 차감 없이 즉시 재시도
+          }
+
           console.error(`API 에러 발생 (상태 코드 ${response.status}):\n`, errorDetails);
           
-          if (response.status === 404) {
-            throw new Error(`API 권한 오류 (404): 입력하신 API 키가 해당 모델에 접근할 수 없습니다.\n올바른 환경에서 발급된 API 키인지 확인해 주세요.`);
-          } else if (response.status === 403) {
+          if (response.status === 403) {
             throw new Error(`API 접근 거부 (403): API 키의 보안 설정(웹사이트 제한) 때문에 접근이 차단되었습니다.\nGoogle Cloud Console에서 해당 웹사이트 주소를 허용 목록에 추가해주세요.`);
           }
-          
-          throw new Error(`API 요청 실패 (${response.status}) - 개발자 도구의 콘솔(Console) 탭을 확인하세요.`);
+          throw new Error(`API 요청 실패 (${response.status}) - 작동 가능한 AI 모델이 없습니다.`);
         }
 
         const data = await response.json();
@@ -276,7 +287,6 @@ export default function App() {
       {/* Main Content */}
       <main className="container mx-auto px-4 max-w-5xl py-10 relative z-0">
         
-        {/* Toast Notification */}
         {toastMessage && (
           <div className="fixed top-24 left-1/2 transform -translate-x-1/2 z-50 bg-neutral-800 border border-neutral-700 text-white px-6 py-3 rounded-md shadow-2xl flex items-center gap-3 animate-fade-in">
             <CheckCircle2 size={20} className="text-red-500" />
@@ -285,7 +295,7 @@ export default function App() {
         )}
 
         {!isAuthenticated ? (
-          /* Auth Section */
+          /* Auth Section (배포용 로그인 화면) */
           <div className="max-w-md mx-auto mt-10 animate-fade-in">
             <div className="bg-[#171717] rounded-xl shadow-2xl border border-neutral-800 p-8 relative overflow-hidden">
               <div className="absolute top-0 left-0 w-full h-1 bg-red-700"></div>
