@@ -7,5 +7,7 @@ export default {
   theme: {
     extend: {},
   },
-  plugins: [require('@tailwindcss/typography')], // typography 플러그인 필요 시 설치: npm install @tailwindcss/typography
+  plugins: [
+    require('@tailwindcss/typography') // 이 부분이 꼭 있어야 합니다!
+  ],
 }
