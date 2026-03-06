@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Search, Copy, Trash2, BookOpen, AlertTriangle, Loader2, CheckCircle2, Fingerprint, Globe, MapPin, Database } from 'lucide-react';
+import { Search, Copy, Trash2, BookOpen, AlertTriangle, Loader2, CheckCircle2, Fingerprint, Globe, MapPin, Database, Key, Lock, LogOut } from 'lucide-react';
 
-// 국내 범죄 사건 100선 (가나다순 정렬을 위해 배열로 선언)
+// 국내 범죄 사건 100선
 const DOMESTIC_CASES = [
   "가습기 살균제 사망 사건", "강기훈 유서 대필 조작 사건", "강서구 PC방 살인 사건 (김성수)", "강호순 연쇄살인 사건", "개구리 소년 실종 사건",
   "고유정 전 남편 살인 사건", "광주 인화학교 사건 (도가니)", "국가정보원 여론 조작 사건", "권인숙 성고문 사건 (부천 경찰서)", "김구 암살 사건 (안두희)",
@@ -48,7 +48,6 @@ const FOREIGN_CASES = [
   "투팍 샤кур 암살 사건", "파나마 페이퍼스 유출 사건", "파블로 에스코바르 (메데인 카르텔)", "파리 바타클랑 극장 테러", "페드로 로페즈 (안데스의 괴물)",
   "프랭크 애버그네일 (캐치 미 이프 유 캔)", "피터 커튼 (뒤셀도르프의 뱀파이어)", "하비 와인스틴 성범죄 사건", "해롤드 쉽먼 (Harold Shipman)", "해튼 가든 안전금고 절도 사건",
   "호아킨 구스만 (엘 차포)", "케이시 앤서니 사건", "모나리자 도난 사건 (1911년)", "타일레놀 독극물 주입 사건", "커트 코베인 사망 사건 (음모론/자살)",
-  // 이하 200개를 맞추기 위한 추가 해외 주요 사건 (총 200건)
   "맨해튼 프로젝트 스파이 사건 (클라우스 푹스)", "마리 앙투아네트 처형", "안네 프랑크 밀고 사건", "로버트 F. 케네디 암살 사건", "말콤 X 암살 사건",
   "마틴 루터 킹 목사 암살 사건", "인도 보팔 가스 누출 참사 (기업 과실)", "체르노빌 원전 사고 (직무유기/은폐)", "영국 잭 더 스트리퍼 (Jack the Stripper)", "조지 플로이드 사망 사건 (경찰 과잉진압)",
   "로스앤젤레스 폭동 원인 사건 (로드니 킹)", "블랙워터 이라크 민간인 학살 사건", "미국 대사관 인질 사건 (이란)", "뮌헨 올림픽 참사 (검은 9월단)", "안드레스 에스코바르 피살 사건",
@@ -75,6 +74,11 @@ export default function App() {
   const sortedDomestic = useMemo(() => [...DOMESTIC_CASES].sort((a, b) => a.localeCompare(b, 'ko-KR')), []);
   const sortedForeign = useMemo(() => [...FOREIGN_CASES].sort((a, b) => a.localeCompare(b, 'ko-KR')), []);
 
+  // 인증 상태 관리
+  const [apiKey, setApiKey] = useState("");
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [keyInput, setKeyInput] = useState("");
+
   // 상태 관리
   const [domesticInput, setDomesticInput] = useState("");
   const [foreignInput, setForeignInput] = useState("");
@@ -84,8 +88,25 @@ export default function App() {
   const [error, setError] = useState("");
   const [toastMessage, setToastMessage] = useState("");
 
-  const apiKey = import.meta.env.VITE_GEMINI_API_KEY; 
+  // 로그인/로그아웃 핸들러
+  const handleLogin = (e) => {
+    e.preventDefault();
+    if (keyInput.trim().length > 10) {
+      setApiKey(keyInput.trim());
+      setIsAuthenticated(true);
+      showToast("시스템 접근 권한이 승인되었습니다.");
+    } else {
+      showToast("유효한 API 키를 입력해주세요.", "error");
+    }
+  };
 
+  const handleLogout = () => {
+    setApiKey("");
+    setIsAuthenticated(false);
+    setKeyInput("");
+    setResult(null);
+    showToast("시스템에서 안전하게 로그아웃되었습니다.");
+  };
 
   // 입력창 상호 배타적 초기화
   const handleDomesticChange = (e) => {
@@ -106,14 +127,14 @@ export default function App() {
     setForeignInput("");
   };
 
-  // Gemini API 호출 로직
+  // Gemini API 호출 로직 (에러 상세 로깅 및 스키마 검사 완화)
   const fetchWithRetry = async (prompt, maxRetries = 5) => {
     let retries = 0;
     const delays = [1000, 2000, 4000, 8000, 16000];
 
     const systemInstruction = `당신은 전 세계의 범죄 사건과 역사적 비극을 철저하게 기록하는 <세계 범죄 사건 백과사전 데이터베이스>입니다.
 사용자가 특정 범죄 사건을 요청하면, 해당 사건에 대해 A4 용지 최대 4장 분량에 달할 정도로 매우 깊이 있고 구체적으로 설명해야 합니다.
-다음의 4가지 섹션으로 나누어 JSON 형식으로 응답해 주세요. 각 섹션의 내용은 최대한 상세하게(전문적인 수사 기록처럼) 작성되어야 합니다.
+다음의 4가지 섹션으로 나누어 반드시 JSON 형식으로만 응답해 주세요. 각 섹션의 내용은 최대한 상세하게(전문적인 수사 기록처럼) 작성되어야 합니다.
 {
   "overview": "사건의 배경, 발생 일시 및 장소, 전반적인 개요를 매우 상세하게 서술...",
   "investigation": "경찰의 수사 초기 상황, 난항, 과학수사 및 증거 수집 과정, 결정적인 단서, 체포 과정 등 수사 전 과정을 서술...",
@@ -121,38 +142,42 @@ export default function App() {
   "aftermath": "사건이 사회, 법, 제도에 미친 파장, 재판 결과 및 형량, 범인의 현재 상태, 사회적/제도적 변화 등을 서술..."
 }`;
 
+    // 400 에러를 방지하기 위해 responseSchema를 제거하고 순수 JSON 응답만 지시
     const payload = {
       contents: [{ parts: [{ text: prompt }] }],
       systemInstruction: { parts: [{ text: systemInstruction }] },
       generationConfig: {
-        responseMimeType: "application/json",
-        responseSchema: {
-          type: "OBJECT",
-          properties: {
-            overview: { type: "STRING" },
-            investigation: { type: "STRING" },
-            people: { type: "STRING" },
-            aftermath: { type: "STRING" }
-          },
-          required: ["overview", "investigation", "people", "aftermath"]
-        }
+        responseMimeType: "application/json"
       }
     };
 
     while (retries <= maxRetries) {
       try {
-        const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`, {
+        // ✅ 가장 안정적인 정식 명칭 모델인 gemini-1.5-flash로 수정됨 (-latest 제거)
+        const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload)
         });
 
-        if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+        // 에러 상세 정보 출력
+        if (!response.ok) {
+          const errorDetails = await response.text();
+          console.error(`API 에러 발생 (상태 코드 ${response.status}):\n`, errorDetails);
+          
+          if (response.status === 404) {
+            throw new Error(`API 권한 오류 (404): 입력하신 API 키가 해당 모델에 접근할 수 없습니다.\n올바른 환경에서 발급된 API 키인지 확인해 주세요.`);
+          } else if (response.status === 403) {
+            throw new Error(`API 접근 거부 (403): API 키의 보안 설정(웹사이트 제한) 때문에 접근이 차단되었습니다.\nGoogle Cloud Console에서 해당 웹사이트 주소를 허용 목록에 추가해주세요.`);
+          }
+          
+          throw new Error(`API 요청 실패 (${response.status}) - 개발자 도구의 콘솔(Console) 탭을 확인하세요.`);
+        }
 
         const data = await response.json();
         const textResponse = data.candidates?.[0]?.content?.parts?.[0]?.text;
         
-        if (!textResponse) throw new Error("No text response from API");
+        if (!textResponse) throw new Error("API로부터 텍스트 응답을 받지 못했습니다.");
 
         let cleanJsonStr = textResponse.trim();
         if (cleanJsonStr.startsWith('```json')) {
@@ -186,7 +211,7 @@ export default function App() {
       setResult({ title: query, ...data });
     } catch (err) {
       console.error(err);
-      setError("자료 데이터베이스에 접근하는 데 실패했습니다. 잠시 후 다시 시도해주세요.");
+      setError(err.message || "자료 데이터베이스에 접근하는 데 실패했습니다.");
     } finally {
       setLoading(false);
     }
@@ -233,11 +258,18 @@ export default function App() {
       
       {/* Header */}
       <header className="bg-[#111] border-b border-red-900/30 sticky top-0 z-10 shadow-2xl">
-        <div className="container mx-auto px-4 max-w-5xl flex items-center justify-center gap-4 py-6">
-          <Fingerprint size={36} className="text-red-600 drop-shadow-[0_0_8px_rgba(220,38,38,0.8)]" />
-          <h1 className="text-3xl sm:text-4xl font-black tracking-widest text-neutral-100 uppercase">
-            세계 범죄 사건 백과
-          </h1>
+        <div className="container mx-auto px-4 max-w-5xl flex items-center justify-between py-6">
+          <div className="flex items-center gap-3 sm:gap-4 flex-1 justify-center sm:justify-start">
+            <Fingerprint size={36} className="text-red-600 drop-shadow-[0_0_8px_rgba(220,38,38,0.8)] shrink-0" />
+            <h1 className="text-2xl sm:text-3xl md:text-4xl font-black tracking-widest text-neutral-100 uppercase truncate">
+              세계 범죄 사건 백과
+            </h1>
+          </div>
+          {isAuthenticated && (
+            <button onClick={handleLogout} className="flex items-center gap-2 text-neutral-400 hover:text-red-500 transition-colors text-xs sm:text-sm font-mono border border-neutral-800 hover:border-red-900/50 px-3 py-2 rounded bg-neutral-900/50 shrink-0 ml-4">
+              <LogOut size={16} /> <span className="hidden sm:inline">LOGOUT</span>
+            </button>
+          )}
         </div>
       </header>
 
@@ -252,180 +284,220 @@ export default function App() {
           </div>
         )}
 
-        {/* Input Section */}
-        {!result && (
-          <div className="bg-[#171717] rounded-xl shadow-2xl border border-neutral-800 p-8 mb-8">
-            <div className="flex items-center gap-3 mb-8 border-b border-neutral-800 pb-4">
-              <Database size={24} className="text-red-600" />
-              <h2 className="text-xl font-bold text-neutral-100 tracking-wide">수사 아카이브 검색</h2>
-            </div>
-            
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-8 mb-8">
-              {/* Domestic Select */}
-              <div className="space-y-3">
-                <label className="flex items-center gap-2 text-sm font-semibold text-neutral-400">
-                  <MapPin size={16} /> 국내 범죄 사건 (100선)
-                </label>
-                <select
-                  value={domesticInput}
-                  onChange={handleDomesticChange}
-                  className="w-full bg-[#0a0a0a] border border-neutral-700 text-neutral-200 text-base rounded-md focus:ring-1 focus:ring-red-600 focus:border-red-600 block p-3.5 transition-colors cursor-pointer"
-                >
-                  <option value="">-- 국내 사건 선택 (가나다순) --</option>
-                  {sortedDomestic.map(c => <option key={`dom-${c}`} value={c}>{c}</option>)}
-                </select>
+        {!isAuthenticated ? (
+          /* Auth Section */
+          <div className="max-w-md mx-auto mt-10 animate-fade-in">
+            <div className="bg-[#171717] rounded-xl shadow-2xl border border-neutral-800 p-8 relative overflow-hidden">
+              <div className="absolute top-0 left-0 w-full h-1 bg-red-700"></div>
+              <div className="flex flex-col items-center mb-8">
+                <div className="w-16 h-16 bg-[#0a0a0a] rounded-full flex items-center justify-center border border-neutral-800 mb-5 shadow-[0_0_15px_rgba(220,38,38,0.1)]">
+                  <Lock size={32} className="text-red-600 drop-shadow-[0_0_8px_rgba(220,38,38,0.5)]" />
+                </div>
+                <h2 className="text-xl font-bold text-neutral-100 tracking-widest uppercase">보안 시스템 인증</h2>
+                <p className="text-neutral-500 text-sm mt-3 font-mono text-center leading-relaxed">기밀 수사 아카이브 접근을 위해<br/>Gemini API 키가 필요합니다.</p>
               </div>
 
-              {/* Foreign Select */}
-              <div className="space-y-3">
-                <label className="flex items-center gap-2 text-sm font-semibold text-neutral-400">
-                  <Globe size={16} /> 해외 범죄 사건 (200선)
-                </label>
-                <select
-                  value={foreignInput}
-                  onChange={handleForeignChange}
-                  className="w-full bg-[#0a0a0a] border border-neutral-700 text-neutral-200 text-base rounded-md focus:ring-1 focus:ring-red-600 focus:border-red-600 block p-3.5 transition-colors cursor-pointer"
+              <form onSubmit={handleLogin} className="space-y-6">
+                <div className="space-y-3">
+                  <label className="flex items-center gap-2 text-sm font-semibold text-neutral-400 tracking-wider">
+                    <Key size={16} className="text-neutral-500" /> API KEY
+                  </label>
+                  <input
+                    type="password"
+                    value={keyInput}
+                    onChange={(e) => setKeyInput(e.target.value)}
+                    placeholder="AIzaSy..."
+                    className="w-full bg-[#0a0a0a] border border-neutral-700 text-neutral-200 text-base rounded-md focus:ring-1 focus:ring-red-600 focus:border-red-600 block p-3.5 transition-colors font-mono tracking-widest placeholder:text-neutral-700"
+                  />
+                </div>
+                <button
+                  type="submit"
+                  disabled={!keyInput.trim()}
+                  className="w-full bg-red-700 hover:bg-red-600 text-white font-bold tracking-widest rounded-md text-lg px-5 py-4 text-center transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-[0_0_15px_rgba(185,28,28,0.2)] mt-4"
                 >
-                  <option value="">-- 해외 사건 선택 (가나다순) --</option>
-                  {sortedForeign.map(c => <option key={`for-${c}`} value={c}>{c}</option>)}
-                </select>
-              </div>
+                  시스템 접속
+                </button>
+              </form>
             </div>
+          </div>
+        ) : (
+          <>
+            {/* Input Section */}
+            {!result && (
+              <div className="bg-[#171717] rounded-xl shadow-2xl border border-neutral-800 p-8 mb-8">
+                <div className="flex items-center gap-3 mb-8 border-b border-neutral-800 pb-4">
+                  <Database size={24} className="text-red-600" />
+                  <h2 className="text-xl font-bold text-neutral-100 tracking-wide">수사 아카이브 검색</h2>
+                </div>
+                
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-8 mb-8">
+                  {/* Domestic Select */}
+                  <div className="space-y-3">
+                    <label className="flex items-center gap-2 text-sm font-semibold text-neutral-400">
+                      <MapPin size={16} /> 국내 범죄 사건 (100선)
+                    </label>
+                    <select
+                      value={domesticInput}
+                      onChange={handleDomesticChange}
+                      className="w-full bg-[#0a0a0a] border border-neutral-700 text-neutral-200 text-base rounded-md focus:ring-1 focus:ring-red-600 focus:border-red-600 block p-3.5 transition-colors cursor-pointer"
+                    >
+                      <option value="">-- 국내 사건 선택 (가나다순) --</option>
+                      {sortedDomestic.map(c => <option key={`dom-${c}`} value={c}>{c}</option>)}
+                    </select>
+                  </div>
 
-            <div className="flex items-center text-neutral-600 text-sm font-mono mb-8">
-              <div className="flex-1 border-t border-neutral-800"></div>
-              <span className="px-4 tracking-widest text-xs">OR MANUAL ENTRY</span>
-              <div className="flex-1 border-t border-neutral-800"></div>
-            </div>
+                  {/* Foreign Select */}
+                  <div className="space-y-3">
+                    <label className="flex items-center gap-2 text-sm font-semibold text-neutral-400">
+                      <Globe size={16} /> 해외 범죄 사건 (200선)
+                    </label>
+                    <select
+                      value={foreignInput}
+                      onChange={handleForeignChange}
+                      className="w-full bg-[#0a0a0a] border border-neutral-700 text-neutral-200 text-base rounded-md focus:ring-1 focus:ring-red-600 focus:border-red-600 block p-3.5 transition-colors cursor-pointer"
+                    >
+                      <option value="">-- 해외 사건 선택 (가나다순) --</option>
+                      {sortedForeign.map(c => <option key={`for-${c}`} value={c}>{c}</option>)}
+                    </select>
+                  </div>
+                </div>
 
-            {/* Manual Input */}
-            <div className="space-y-3 mb-8">
-              <label className="flex items-center gap-2 text-sm font-semibold text-neutral-400">
-                <Search size={16} /> 사건명 직접 입력
-              </label>
-              <input
-                type="text"
-                value={manualInput}
-                onChange={handleManualChange}
-                placeholder="찾으시는 사건이 목록에 없다면 직접 입력하세요..."
-                className="w-full bg-[#0a0a0a] border border-neutral-700 text-neutral-200 text-base rounded-md focus:ring-1 focus:ring-red-600 focus:border-red-600 block p-3.5 transition-colors font-mono"
-                onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
-              />
-            </div>
+                <div className="flex items-center text-neutral-600 text-sm font-mono mb-8">
+                  <div className="flex-1 border-t border-neutral-800"></div>
+                  <span className="px-4 tracking-widest text-xs">OR MANUAL ENTRY</span>
+                  <div className="flex-1 border-t border-neutral-800"></div>
+                </div>
 
-            <button
-              onClick={handleSearch}
-              disabled={loading || (!domesticInput && !foreignInput && !manualInput.trim())}
-              className="w-full bg-red-700 hover:bg-red-600 text-white font-bold tracking-widest rounded-md text-lg px-5 py-4 text-center flex items-center justify-center gap-3 transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-[0_0_15px_rgba(185,28,28,0.2)] hover:shadow-[0_0_25px_rgba(220,38,38,0.4)]"
-            >
-              {loading ? (
-                <><Loader2 size={24} className="animate-spin" /> 아카이브 접근 및 자료 열람 중...</>
-              ) : (
-                <><BookOpen size={24} /> 기밀 자료 열람하기</>
-              )}
-            </button>
+                {/* Manual Input */}
+                <div className="space-y-3 mb-8">
+                  <label className="flex items-center gap-2 text-sm font-semibold text-neutral-400">
+                    <Search size={16} /> 사건명 직접 입력
+                  </label>
+                  <input
+                    type="text"
+                    value={manualInput}
+                    onChange={handleManualChange}
+                    placeholder="찾으시는 사건이 목록에 없다면 직접 입력하세요..."
+                    className="w-full bg-[#0a0a0a] border border-neutral-700 text-neutral-200 text-base rounded-md focus:ring-1 focus:ring-red-600 focus:border-red-600 block p-3.5 transition-colors font-mono"
+                    onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
+                  />
+                </div>
 
-            {error && (
-              <div className="mt-6 p-4 text-sm text-red-400 rounded-md bg-red-950/30 border border-red-900/50 flex items-start gap-3">
-                <AlertTriangle size={20} className="mt-0.5 shrink-0" />
-                <p className="font-mono">{error}</p>
+                <button
+                  onClick={handleSearch}
+                  disabled={loading || (!domesticInput && !foreignInput && !manualInput.trim())}
+                  className="w-full bg-red-700 hover:bg-red-600 text-white font-bold tracking-widest rounded-md text-lg px-5 py-4 text-center flex items-center justify-center gap-3 transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-[0_0_15px_rgba(185,28,28,0.2)] hover:shadow-[0_0_25px_rgba(220,38,38,0.4)]"
+                >
+                  {loading ? (
+                    <><Loader2 size={24} className="animate-spin" /> 아카이브 접근 및 자료 열람 중...</>
+                  ) : (
+                    <><BookOpen size={24} /> 기밀 자료 열람하기</>
+                  )}
+                </button>
+
+                {error && (
+                  <div className="mt-6 p-4 text-sm text-red-400 rounded-md bg-red-950/30 border border-red-900/50 flex items-start gap-3">
+                    <AlertTriangle size={20} className="mt-0.5 shrink-0" />
+                    <p className="font-mono whitespace-pre-wrap">{error}</p>
+                  </div>
+                )}
               </div>
             )}
-          </div>
-        )}
 
-        {/* Loading State Overlay */}
-        {loading && !result && (
-          <div className="py-32 flex flex-col items-center justify-center text-neutral-400 font-mono">
-            <Loader2 size={64} className="animate-spin text-red-700 mb-6 drop-shadow-[0_0_10px_rgba(185,28,28,0.8)]" />
-            <p className="text-xl tracking-widest text-neutral-200">ACCESSING DATABASE...</p>
-            <p className="text-sm mt-3 text-neutral-500">A4 4장 분량의 방대한 수사 기록을 복호화 중입니다.</p>
-          </div>
-        )}
-
-        {/* Result Section (Dossier View) */}
-        {result && !loading && (
-          <div className="animate-fade-in pb-12">
-            
-            {/* Top Controls */}
-            <div className="flex flex-col sm:flex-row justify-between items-center mb-6 gap-4 bg-[#171717] p-4 rounded-md shadow-lg border border-neutral-800">
-              <h2 className="text-2xl font-black text-neutral-100 truncate px-4 border-l-4 border-red-600 uppercase tracking-wider">
-                {result.title}
-              </h2>
-              <div className="flex gap-3 w-full sm:w-auto font-mono">
-                <button onClick={handleCopy} className="flex-1 sm:flex-none flex items-center justify-center gap-2 bg-neutral-800 hover:bg-neutral-700 text-white px-5 py-2.5 rounded transition-colors text-sm">
-                  <Copy size={16} /> 복사
-                </button>
-                <button onClick={handleClearAndReturn} className="flex-1 sm:flex-none flex items-center justify-center gap-2 bg-red-950/50 hover:bg-red-900 text-red-400 px-5 py-2.5 rounded border border-red-900/50 transition-colors text-sm">
-                  <Trash2 size={16} /> 닫기
-                </button>
+            {/* Loading State Overlay */}
+            {loading && !result && (
+              <div className="py-32 flex flex-col items-center justify-center text-neutral-400 font-mono">
+                <Loader2 size={64} className="animate-spin text-red-700 mb-6 drop-shadow-[0_0_10px_rgba(185,28,28,0.8)]" />
+                <p className="text-xl tracking-widest text-neutral-200">ACCESSING DATABASE...</p>
+                <p className="text-sm mt-3 text-neutral-500">A4 4장 분량의 방대한 수사 기록을 복호화 중입니다.</p>
               </div>
-            </div>
+            )}
 
-            {/* Content Cards (File Folders) */}
-            <div className="space-y-8">
-              
-              <section className="bg-[#111] rounded-md shadow-2xl border border-neutral-800 relative overflow-hidden">
-                <div className="absolute top-0 left-0 w-full h-1 bg-neutral-700"></div>
-                <div className="p-6 md:p-10">
-                  <h3 className="text-xl font-bold text-red-500 mb-6 pb-4 border-b border-neutral-800 flex items-center gap-3 uppercase tracking-widest">
-                    <span className="text-sm font-mono text-neutral-500 border border-neutral-700 px-2 py-1 rounded">FILE 01</span> 사건 개요
-                  </h3>
-                  <div className="prose prose-invert max-w-none text-neutral-300 leading-8 whitespace-pre-line text-justify font-serif">
-                    {result.overview}
+            {/* Result Section (Dossier View) */}
+            {result && !loading && (
+              <div className="animate-fade-in pb-12">
+                
+                {/* Top Controls */}
+                <div className="flex flex-col sm:flex-row justify-between items-center mb-6 gap-4 bg-[#171717] p-4 rounded-md shadow-lg border border-neutral-800">
+                  <h2 className="text-2xl font-black text-neutral-100 truncate px-4 border-l-4 border-red-600 uppercase tracking-wider">
+                    {result.title}
+                  </h2>
+                  <div className="flex gap-3 w-full sm:w-auto font-mono">
+                    <button onClick={handleCopy} className="flex-1 sm:flex-none flex items-center justify-center gap-2 bg-neutral-800 hover:bg-neutral-700 text-white px-5 py-2.5 rounded transition-colors text-sm">
+                      <Copy size={16} /> 복사
+                    </button>
+                    <button onClick={handleClearAndReturn} className="flex-1 sm:flex-none flex items-center justify-center gap-2 bg-red-950/50 hover:bg-red-900 text-red-400 px-5 py-2.5 rounded border border-red-900/50 transition-colors text-sm">
+                      <Trash2 size={16} /> 닫기
+                    </button>
                   </div>
                 </div>
-              </section>
 
-              <section className="bg-[#111] rounded-md shadow-2xl border border-neutral-800 relative overflow-hidden">
-                <div className="absolute top-0 left-0 w-full h-1 bg-neutral-700"></div>
-                <div className="p-6 md:p-10">
-                  <h3 className="text-xl font-bold text-red-500 mb-6 pb-4 border-b border-neutral-800 flex items-center gap-3 uppercase tracking-widest">
-                    <span className="text-sm font-mono text-neutral-500 border border-neutral-700 px-2 py-1 rounded">FILE 02</span> 수사 과정
-                  </h3>
-                  <div className="prose prose-invert max-w-none text-neutral-300 leading-8 whitespace-pre-line text-justify font-serif">
-                    {result.investigation}
-                  </div>
+                {/* Content Cards (File Folders) */}
+                <div className="space-y-8">
+                  
+                  <section className="bg-[#111] rounded-md shadow-2xl border border-neutral-800 relative overflow-hidden">
+                    <div className="absolute top-0 left-0 w-full h-1 bg-neutral-700"></div>
+                    <div className="p-6 md:p-10">
+                      <h3 className="text-xl font-bold text-red-500 mb-6 pb-4 border-b border-neutral-800 flex items-center gap-3 uppercase tracking-widest">
+                        <span className="text-sm font-mono text-neutral-500 border border-neutral-700 px-2 py-1 rounded">FILE 01</span> 사건 개요
+                      </h3>
+                      <div className="prose prose-invert max-w-none text-neutral-300 leading-8 whitespace-pre-line text-justify font-serif">
+                        {result.overview}
+                      </div>
+                    </div>
+                  </section>
+
+                  <section className="bg-[#111] rounded-md shadow-2xl border border-neutral-800 relative overflow-hidden">
+                    <div className="absolute top-0 left-0 w-full h-1 bg-neutral-700"></div>
+                    <div className="p-6 md:p-10">
+                      <h3 className="text-xl font-bold text-red-500 mb-6 pb-4 border-b border-neutral-800 flex items-center gap-3 uppercase tracking-widest">
+                        <span className="text-sm font-mono text-neutral-500 border border-neutral-700 px-2 py-1 rounded">FILE 02</span> 수사 과정
+                      </h3>
+                      <div className="prose prose-invert max-w-none text-neutral-300 leading-8 whitespace-pre-line text-justify font-serif">
+                        {result.investigation}
+                      </div>
+                    </div>
+                  </section>
+
+                  <section className="bg-[#111] rounded-md shadow-2xl border border-neutral-800 relative overflow-hidden">
+                    <div className="absolute top-0 left-0 w-full h-1 bg-neutral-700"></div>
+                    <div className="p-6 md:p-10">
+                      <h3 className="text-xl font-bold text-red-500 mb-6 pb-4 border-b border-neutral-800 flex items-center gap-3 uppercase tracking-widest">
+                        <span className="text-sm font-mono text-neutral-500 border border-neutral-700 px-2 py-1 rounded">FILE 03</span> 범인과 피해자
+                      </h3>
+                      <div className="prose prose-invert max-w-none text-neutral-300 leading-8 whitespace-pre-line text-justify font-serif">
+                        {result.people}
+                      </div>
+                    </div>
+                  </section>
+
+                  <section className="bg-[#111] rounded-md shadow-2xl border border-neutral-800 relative overflow-hidden">
+                    <div className="absolute top-0 left-0 w-full h-1 bg-neutral-700"></div>
+                    <div className="p-6 md:p-10">
+                      <h3 className="text-xl font-bold text-red-500 mb-6 pb-4 border-b border-neutral-800 flex items-center gap-3 uppercase tracking-widest">
+                        <span className="text-sm font-mono text-neutral-500 border border-neutral-700 px-2 py-1 rounded">FILE 04</span> 사건 이후
+                      </h3>
+                      <div className="prose prose-invert max-w-none text-neutral-300 leading-8 whitespace-pre-line text-justify font-serif">
+                        {result.aftermath}
+                      </div>
+                    </div>
+                  </section>
+
                 </div>
-              </section>
 
-              <section className="bg-[#111] rounded-md shadow-2xl border border-neutral-800 relative overflow-hidden">
-                <div className="absolute top-0 left-0 w-full h-1 bg-neutral-700"></div>
-                <div className="p-6 md:p-10">
-                  <h3 className="text-xl font-bold text-red-500 mb-6 pb-4 border-b border-neutral-800 flex items-center gap-3 uppercase tracking-widest">
-                    <span className="text-sm font-mono text-neutral-500 border border-neutral-700 px-2 py-1 rounded">FILE 03</span> 범인과 피해자
-                  </h3>
-                  <div className="prose prose-invert max-w-none text-neutral-300 leading-8 whitespace-pre-line text-justify font-serif">
-                    {result.people}
-                  </div>
+                {/* Bottom Controls */}
+                <div className="flex flex-col sm:flex-row justify-center items-center mt-12 gap-6 font-mono">
+                   <button onClick={handleCopy} className="w-full sm:w-auto flex items-center justify-center gap-3 bg-neutral-800 hover:bg-neutral-700 text-white px-8 py-4 rounded-md transition-colors font-bold tracking-widest shadow-lg border border-neutral-600">
+                      <Copy size={20} /> 자료 전체 복사
+                    </button>
+                    <button onClick={handleClearAndReturn} className="w-full sm:w-auto flex items-center justify-center gap-3 bg-red-950/50 hover:bg-red-900 text-red-400 px-8 py-4 rounded-md transition-colors font-bold tracking-widest shadow-lg border border-red-900/50">
+                      <Trash2 size={20} /> 문서 파기 및 복귀
+                    </button>
                 </div>
-              </section>
 
-              <section className="bg-[#111] rounded-md shadow-2xl border border-neutral-800 relative overflow-hidden">
-                <div className="absolute top-0 left-0 w-full h-1 bg-neutral-700"></div>
-                <div className="p-6 md:p-10">
-                  <h3 className="text-xl font-bold text-red-500 mb-6 pb-4 border-b border-neutral-800 flex items-center gap-3 uppercase tracking-widest">
-                    <span className="text-sm font-mono text-neutral-500 border border-neutral-700 px-2 py-1 rounded">FILE 04</span> 사건 이후
-                  </h3>
-                  <div className="prose prose-invert max-w-none text-neutral-300 leading-8 whitespace-pre-line text-justify font-serif">
-                    {result.aftermath}
-                  </div>
-                </div>
-              </section>
-
-            </div>
-
-            {/* Bottom Controls */}
-            <div className="flex flex-col sm:flex-row justify-center items-center mt-12 gap-6 font-mono">
-               <button onClick={handleCopy} className="w-full sm:w-auto flex items-center justify-center gap-3 bg-neutral-800 hover:bg-neutral-700 text-white px-8 py-4 rounded-md transition-colors font-bold tracking-widest shadow-lg border border-neutral-600">
-                  <Copy size={20} /> 자료 전체 복사
-                </button>
-                <button onClick={handleClearAndReturn} className="w-full sm:w-auto flex items-center justify-center gap-3 bg-red-950/50 hover:bg-red-900 text-red-400 px-8 py-4 rounded-md transition-colors font-bold tracking-widest shadow-lg border border-red-900/50">
-                  <Trash2 size={20} /> 문서 파기 및 복귀
-                </button>
-            </div>
-
-          </div>
+              </div>
+            )}
+          </>
         )}
       </main>
 
